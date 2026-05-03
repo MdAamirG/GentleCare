@@ -21,6 +21,7 @@ export default function ElderLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -30,17 +31,18 @@ export default function ElderLoginPage() {
 
     try {
       setLoading(true);
+      setError(null);
       const response = await authAPI.login(email, password);
       
       if (response.user.user_type !== 'elder') {
-        Alert.alert('Error', 'This account is not registered as an elder');
+        setError('This account is not registered as an elder');
         await authAPI.logout();
         return;
       }
 
       router.replace('/elder/Dashboard');
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message || 'Invalid email or password');
+      setError(error.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
@@ -66,6 +68,11 @@ export default function ElderLoginPage() {
           </View>
 
           <View style={styles.form}>
+            {error && (
+              <View style={[styles.errorContainer, { backgroundColor: colors.error + '15' }]}>
+                <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+              </View>
+            )}
             <TextInput
               label="Email"
               mode="outlined"
@@ -189,5 +196,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     marginTop: 32,
+  },
+  errorContainer: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    width: '100%',
+  },
+  errorText: {
+    fontSize: 14,
+    fontFamily: "Poppins_500Medium",
+    textAlign: 'center',
   },
 });

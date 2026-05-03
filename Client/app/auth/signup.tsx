@@ -11,7 +11,8 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
-  SafeAreaView
+  SafeAreaView,
+  Platform,
 } from "react-native";
 import { Text, TextInput, Button, useTheme, IconButton } from "react-native-paper";
 import { useRouter } from "expo-router";
@@ -32,6 +33,9 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [linkEmail, setLinkEmail] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const elderPressAnim = useRef(new Animated.Value(1)).current;
   const caretakerPressAnim = useRef(new Animated.Value(1)).current;
@@ -54,43 +58,48 @@ export default function SignupPage() {
     setEmail("");
     setPassword("");
     setConfirmPassword("");
+    setLinkEmail("");
+    setSuccess(false);
+    setErrorMsg(null);
   };
 
   const handleRegister = async () => {
     // Validation
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
-      Alert.alert("Error", "Please fill in all fields");
+      setErrorMsg("Please fill in all fields");
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match");
+      setErrorMsg("Passwords do not match");
       return;
     }
     if (password.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters");
+      setErrorMsg("Password must be at least 6 characters");
       return;
     }
 
     try {
       setLoading(true);
-      const response = await authAPI.signup({
+      setErrorMsg(null);
+      await authAPI.signup({
         email: email.trim().toLowerCase(),
         password,
         full_name: fullName.trim(),
         user_type: selectedRole!,
+        link_email: linkEmail.trim().toLowerCase(),
       });
 
-      setModalVisible(false);
-      resetForm();
+      setSuccess(true);
+      
+      // Short delay to show success before redirecting
+      setTimeout(() => {
+        setModalVisible(false);
+        resetForm();
+        router.replace("/auth/login");
+      }, 2000);
 
-      // Navigate to appropriate dashboard
-      if (selectedRole === "elder") {
-        router.replace("/elder/Dashboard");
-      } else {
-        router.replace("/caretaker/Dashboard");
-      }
     } catch (error: any) {
-      Alert.alert("Registration Failed", error.message || "Could not create account. Please try again.");
+      setErrorMsg(error.message || "Could not create account. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -156,8 +165,21 @@ export default function SignupPage() {
             <Text style={[styles.modalTitle, { color: colors.primary }]}>
               {selectedRole === "elder" ? "Elder Signup" : "Caretaker Signup"}
             </Text>
-            <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-              <View style={styles.inputContainer}>
+
+            {success ? (
+              <View style={styles.successContainer}>
+                <MaterialCommunityIcons name="check-circle" size={80} color={colors.success || "#4CAF50"} />
+                <Text style={[styles.successText, { color: colors.onSurface }]}>Account Created!</Text>
+                <Text style={[styles.successSubtext, { color: colors.onSurfaceVariant }]}>Redirecting to login...</Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+                {errorMsg && (
+                  <View style={[styles.errorContainer, { backgroundColor: colors.error + '15' }]}>
+                    <Text style={[styles.errorText, { color: colors.error }]}>{errorMsg}</Text>
+                  </View>
+                )}
+                <View style={styles.inputContainer}>
                 <TextInput
                   label="Full Name"
                   mode="outlined"
@@ -196,19 +218,34 @@ export default function SignupPage() {
                   onChangeText={setConfirmPassword}
                   style={styles.input}
                   theme={{ colors: { primary: colors.primary } }}
+                  left={<TextInput.Icon icon="lock-check-outline" color={colors.onSurfaceVariant} />}
+                  disabled={loading}
+                />
+                <TextInput
+                  label={selectedRole === 'elder' ? "Caretaker's Email (Optional)" : "Elder's Email (Optional)"}
+                  mode="outlined"
+                  placeholder="Link account automatically"
+                  keyboardType="email-address"
+                  value={linkEmail}
+                  onChangeText={setLinkEmail}
+                  style={styles.input}
+                  autoCapitalize="none"
+                  theme={{ colors: { primary: colors.primary } }}
+                  left={<TextInput.Icon icon="link-variant" color={colors.onSurfaceVariant} />}
                   disabled={loading}
                 />
               </View>
-              <Button
-                mode="contained"
-                onPress={handleRegister}
-                style={styles.button}
-                disabled={loading}
-                loading={loading}
-              >
-                {loading ? "Creating Account..." : "Register"}
-              </Button>
-            </ScrollView>
+                <Button
+                  mode="contained"
+                  onPress={handleRegister}
+                  style={styles.button}
+                  disabled={loading}
+                  loading={loading}
+                >
+                  {loading ? "Creating Account..." : "Register"}
+                </Button>
+              </ScrollView>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -329,5 +366,30 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     width: "100%",
+  },
+  successContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  successText: {
+    fontSize: 22,
+    fontFamily: "Poppins_700Bold",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  successSubtext: {
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+  },
+  errorContainer: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 14,
+    fontFamily: "Poppins_500Medium",
+    textAlign: 'center',
   },
 });

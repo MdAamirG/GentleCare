@@ -55,9 +55,16 @@ export default function MealTracker() {
   const [fats, setFats] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState("");
+
+  const showSnackbar = (message: string) => {
+    setSnackbarMsg(message);
+    setSnackbarVisible(true);
+  };
 
   const fetchMeals = useCallback(async () => {
     try {
@@ -79,8 +86,12 @@ export default function MealTracker() {
       try {
         const profile = await authAPI.getProfile();
         if (profile.elders && profile.elders.length > 0) {
-          setElders(profile.elders);
-          setSelectedElderId(profile.elders[0].id);
+          const mappedElders = profile.elders.map((e: any) => ({
+            id: e.id,
+            name: e.name || e.full_name || "Unknown Patient"
+          }));
+          setElders(mappedElders);
+          setSelectedElderId(mappedElders[0].id);
         }
       } catch (e) {
         // Handle error
@@ -135,22 +146,49 @@ export default function MealTracker() {
     }
 
     try {
-      await mealAPI.addMeal({
+      setSubmitting(true);
+      const response = await mealAPI.addMeal({
+        elder_id: selectedElderId,
         meal_type: mealType,
         meal_name: mealName,
-        calories: calories ? parseInt(calories) : undefined,
-        protein: protein ? parseInt(protein) : undefined,
-        carbs: carbs ? parseInt(carbs) : undefined,
-        fats: fats ? parseInt(fats) : undefined,
+        calories: parseInt(calories) || 0,
+        protein: parseFloat(protein) || 0,
+        carbs: parseFloat(carbs) || 0,
+        fats: parseFloat(fats) || 0,
         scheduled_time: scheduledTime || undefined,
         notes: notes || undefined,
-        elder_id: selectedElderId,
       });
-      showSnackbar("Meal added successfully");
+
+      // 1. Close Modal IMMEDIATELY
       setModalVisible(false);
+
+      // 2. Optimistic Update: Inject the meal into the list
+      const newMeal: Meal = {
+        id: response.meal_id || Date.now(),
+        meal_type: mealType,
+        meal_name: mealName,
+        calories: parseInt(calories) || 0,
+        protein: parseFloat(protein) || 0,
+        carbs: parseFloat(carbs) || 0,
+        fats: parseFloat(fats) || 0,
+        scheduled_time: scheduledTime || new Date().toISOString(),
+        notes: notes || undefined,
+      };
+      
+      setMeals(prev => [newMeal, ...prev]);
+
+      // 3. Reset form
       resetForm();
+      setSubmitting(false);
+      
+      // 4. Success notification (consistent with rest of app)
+      showSnackbar("✅ Meal added successfully!");
+      
+      // 5. Background sync
       fetchMeals();
+      
     } catch (error: any) {
+      setSubmitting(false);
       Alert.alert("Error", error.message || "Failed to add meal");
     }
   };
@@ -170,10 +208,7 @@ export default function MealTracker() {
     }
   };
 
-  const showSnackbar = (message: string) => {
-    setSnackbarMsg(message);
-    setSnackbarVisible(true);
-  };
+
 
   const handleDateSelect = (day: any) => {
     setSelectedDate(day.dateString);
@@ -502,8 +537,14 @@ export default function MealTracker() {
                 >
                   Cancel
                 </Button>
-                <Button mode="contained" onPress={handleAdd}>
-                  Add
+                <Button 
+                  mode="contained" 
+                  onPress={handleAdd}
+                  style={styles.modalButton}
+                  loading={submitting}
+                  disabled={!mealName || submitting || isSuccess}
+                >
+                  {submitting ? "Adding..." : (isSuccess ? "Added!" : "Add Meal")}
                 </Button>
               </View>
             </ScrollView>

@@ -26,6 +26,7 @@ export default function BackButton({ onPress, color, size = 28 }: BackButtonProp
       style={styles.backButton} 
       onPress={handlePress}
       activeOpacity={0.7}
+      hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
     >
       <Ionicons 
         name="arrow-back" 
@@ -39,9 +40,11 @@ export default function BackButton({ onPress, color, size = 28 }: BackButtonProp
 const styles = StyleSheet.create({
   backButton: {
     position: "absolute",
-    top: 45,
-    left: 15,
-    zIndex: 10,
-    padding: 5,
+    top: 50,
+    left: 20,
+    zIndex: 9999,
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 20,
   },
 });

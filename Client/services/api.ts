@@ -7,24 +7,17 @@ import { Platform } from 'react-native';
 import io from 'socket.io-client';
 
 // Use env-configured backend URL, with simulator-friendly defaults for local dev.
-const defaultLocalApi = 'http://192.168.1.67:5001'; // Fixed for physical phone testing
+// EXPO_PUBLIC_API_URL should be set in your .env file for production.
+const defaultLocalApi = 'http://localhost:5001'; 
 const defaultProductionApi = 'https://gentlecare-server.onrender.com';
 
-// For static site deployments, check if we're on web and not on localhost
-const isProduction = () => {
-  if (typeof window !== 'undefined' && Platform.OS === 'web') {
-    const hostname = window.location.hostname;
-    // Use production URL if not on localhost
-    return hostname !== 'localhost' && hostname !== '127.0.0.1';
-  }
-  return process.env.NODE_ENV === 'production';
-};
-
 export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
-  (isProduction() ? defaultProductionApi : defaultLocalApi)
+  process.env.EXPO_PUBLIC_API_URL || 
+  (Platform.OS === 'web' ? window.location.origin.replace(':8081', ':5001') : defaultLocalApi)
 ).replace(/\/$/, '');
+
 const SOCKET_URL = API_BASE_URL;
+console.log(`[API] Connecting to: ${API_BASE_URL}`);
 
 // Socket instance
 let socket: any = null;
@@ -89,7 +82,7 @@ async function apiRequest(endpoint: string, options: any = {}) {
       
       if (response.status === 401 || response.status === 422) {
         // Clear token silently
-        await storage.removeToken();
+        await storage.clear();
         throw new Error("AUTH_ERROR: " + errorMsg);
       }
       
@@ -142,6 +135,17 @@ export const socketService = {
       socket = null;
     }
     this._userId = null;
+  },
+
+  join(userId: number) {
+    this._userId = userId;
+    if (socket) {
+      socket.emit('join', { user_id: userId });
+      console.log(`Socket: Sent join request for user ${userId}`);
+    } else {
+      console.log(`Socket: Cannot join, socket not connected. Connecting now...`);
+      this.connect(userId);
+    }
   },
   
   on(event: string, callback: Function) {

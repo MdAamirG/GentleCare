@@ -57,9 +57,14 @@ export default function HealthTracking() {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState("");
 
+  const showSnackbar = (message: string) => {
+    setSnackbarMsg(message);
+    setSnackbarVisible(true);
+  };
+
   const fetchRecords = useCallback(async () => {
     try {
-      const response = await healthAPI.getRecords({ days: 7 });
+      const response = await healthAPI.getRecords({ days: 7, _t: Date.now() });
       const fetchedRecords = response.records || [];
       setRecords(fetchedRecords);
     } catch (error: any) {
@@ -74,9 +79,19 @@ export default function HealthTracking() {
   useEffect(() => {
     fetchRecords();
 
-    const refreshFromRealtime = () => {
+    const refreshFromRealtime = (_data: any) => {
       fetchRecords();
     };
+
+    // Join room for live updates
+    const initSocket = async () => {
+      const userStr = await AsyncStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        socketService.join(user.id);
+      }
+    };
+    initSocket();
 
     socketService.on('health_record_added', refreshFromRealtime);
     socketService.on('health_record_deleted', refreshFromRealtime);
@@ -115,10 +130,7 @@ export default function HealthTracking() {
     fetchRecords();
   };
 
-  const showSnackbar = (message: string) => {
-    setSnackbarMsg(message);
-    setSnackbarVisible(true);
-  };
+
 
   const heartRateData = getChartData("heart_rate");
   const glucoseData = getChartData("blood_glucose");
@@ -189,6 +201,8 @@ export default function HealthTracking() {
     </View>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {

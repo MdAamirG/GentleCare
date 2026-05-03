@@ -35,8 +35,9 @@ interface HealthRecord {
 
 interface Elder {
   id: number;
-  user_id: number;
-  full_name: string;
+  user_id?: number;
+  name: string;
+  full_name?: string; // fallback
 }
 
 export default function HealthRecords() {
@@ -55,6 +56,7 @@ export default function HealthRecords() {
   const [value, setValue] = useState("");
   const [value2, setValue2] = useState(""); // For systolic/diastolic BP
   const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Health record categories with auto-assigned units
   const healthCategories = [
@@ -70,9 +72,14 @@ export default function HealthRecords() {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState("");
 
+  const showSnackbar = (message: string) => {
+    setSnackbarMsg(message);
+    setSnackbarVisible(true);
+  };
+
   const fetchRecords = useCallback(async () => {
     try {
-      const params: any = { days: 7 };
+      const params: any = { days: 7, _t: Date.now() };
       if (selectedElderId) {
         params.elder_id = selectedElderId;
       }
@@ -95,9 +102,19 @@ export default function HealthRecords() {
   useEffect(() => {
     fetchRecords();
 
-    const refreshFromRealtime = () => {
+    const refreshFromRealtime = (_data: any) => {
       fetchRecords();
     };
+
+    // Join room for live updates
+    const initSocket = async () => {
+      const userStr = await AsyncStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        socketService.join(user.id);
+      }
+    };
+    initSocket();
 
     socketService.on('health_record_added', refreshFromRealtime);
     socketService.on('health_record_deleted', refreshFromRealtime);
@@ -114,10 +131,14 @@ export default function HealthRecords() {
       if (userStr) {
         const user = JSON.parse(userStr);
         if (user.user_type === 'caretaker' && user.profile?.elders) {
-          setElders(user.profile.elders);
+          const mappedElders = user.profile.elders.map((e: any) => ({
+            id: e.id,
+            name: e.name || e.full_name || "Unknown Patient"
+          }));
+          setElders(mappedElders);
           // Auto-select first elder if only one
-          if (user.profile.elders.length === 1) {
-            setSelectedElderId(user.profile.elders[0].id);
+          if (mappedElders.length === 1) {
+            setSelectedElderId(mappedElders[0].id);
           }
         }
       }
@@ -169,49 +190,56 @@ export default function HealthRecords() {
   const handleAdd = async () => {
     const category = getSelectedCategory();
     
-    if (!selectedElderId) {
-      Alert.alert("Select Elder", "Please select an elder to add this record for");
-      return;
-    }
-    
-    if (!selectedCategory || !category) {
-      Alert.alert("Missing Category", "Please select a health category");
-      return;
-    }
-
-    if (!value.trim()) {
-      Alert.alert("Missing Value", "Please enter a value");
-      return;
-    }
-
-    // For blood pressure, need both values
-    if (category.type === "dual" && !value2.trim()) {
-      Alert.alert("Missing Value", "Please enter both systolic and diastolic values");
-      return;
+    if (!selectedElderId || !category || !value.trim()) {
+       Alert.alert("Missing Info", "Please select a category and enter a value.");
+       return;
     }
 
     try {
-      const finalValue = category.type === "dual" ? `${value}/${value2}` : value;
+      setSubmitting(true);
+      const finalValue = category?.type === "dual" ? `${value}/${value2}` : value;
       
-      await healthAPI.addRecord({
-        type: category.id,
+      // 1. Trigger server save
+      const response = await healthAPI.addRecord({
+        type: category?.id || selectedCategory,
         value: finalValue,
-        unit: category.unit,
+        unit: category?.unit || "units",
         notes: notes || undefined,
-        elder_id: selectedElderId,
+        elder_id: selectedElderId || 0,
       });
       
-      // Close modal and reset form first
+      // 2. CLOSE MODAL IMMEDIATELY - Absolute Priority
       setModalVisible(false);
+
+      // 3. SAFE BUTTER UPDATE: Inject data with fallback
+      try {
+        const newRecord: HealthRecord = {
+          id: response?.record_id || Date.now(),
+          type: category?.id || selectedCategory,
+          value: finalValue,
+          unit: category?.unit || "units",
+          notes: notes || undefined,
+          recorded_at: new Date().toISOString()
+        };
+        
+        setRecords(prev => [newRecord, ...(Array.isArray(prev) ? prev : [])]);
+      } catch (e) {
+        console.error("Optimistic update failed, falling back to fetch", e);
+      }
+      
+      // 4. Clean up
       resetForm();
+      setSubmitting(false);
+      showSnackbar(`✅ ${category?.label || "Record"} added!`);
       
-      // Show success message
-      showSnackbar("Health record added successfully");
+      // 5. Hard Refresh in background
+      fetchRecords();
       
-      // Refresh the records list
-      await fetchRecords();
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to add health record");
+      setSubmitting(false);
+      // Close modal even on error if it's already submitting
+      setModalVisible(false);
+      Alert.alert("Error", error.message || "Failed to save record");
     }
   };
 
@@ -234,10 +262,7 @@ export default function HealthRecords() {
     ]);
   };
 
-  const showSnackbar = (message: string) => {
-    setSnackbarMsg(message);
-    setSnackbarVisible(true);
-  };
+
 
   const heartRateData = getChartData("heart_rate");
   const glucoseData = getChartData("blood_glucose");
@@ -355,7 +380,7 @@ export default function HealthRecords() {
                         onPress={() => setSelectedElderId(elder.id)}
                         style={styles.elderButton}
                       >
-                        {elder.full_name}
+                        {elder.name}
                       </Button>
                     ))}
                   </View>
@@ -487,11 +512,14 @@ export default function HealthRecords() {
                 </Button>
                 <Button 
                   mode="contained" 
-                  onPress={handleAdd}
+                  onPress={() => {
+                    console.log("TOUCH: Add Record button clicked!");
+                    handleAdd();
+                  }}
                   style={{ flex: 1, marginLeft: 8 }}
-                  disabled={!selectedCategory || !value}
+                  loading={submitting}
                 >
-                  Add Record
+                  {submitting ? "Adding..." : "Add Record"}
                 </Button>
               </View>
             </ScrollView>

@@ -35,14 +35,30 @@ export default function ElderDashboard() {
 
   useEffect(() => {
     loadDashboard();
-    const refresh = () => loadDashboard();
+    const refresh = () => {
+      loadDashboard();
+    };
+
     socketService.on('medication_logged', refresh);
-    socketService.on('notification_created', refresh);
+    socketService.on('medication_added', refresh);
+    socketService.on('medication_deleted', refresh);
+    socketService.on('meal_added', refresh);
+    socketService.on('meal_consumed', refresh);
     socketService.on('health_record_added', refresh);
+    socketService.on('appointment_added', refresh);
+    socketService.on('appointment_updated', refresh);
+    socketService.on('notification_created', refresh);
+
     return () => {
-      socketService.off('medication_logged', refresh);
-      socketService.off('notification_created', refresh);
-      socketService.off('health_record_added', refresh);
+      socketService.off('medication_logged');
+      socketService.off('medication_added');
+      socketService.off('medication_deleted');
+      socketService.off('meal_added');
+      socketService.off('meal_consumed');
+      socketService.off('health_record_added');
+      socketService.off('appointment_added');
+      socketService.off('appointment_updated');
+      socketService.off('notification_created');
     };
   }, [loadDashboard]);
 
@@ -85,8 +101,8 @@ export default function ElderDashboard() {
             <QuickAccessCard title="Meal Tracker" icon="food-apple" color="#81C784" onPress={() => router.push("/elder/MealTracker")} />
             <QuickAccessCard title="Appointments" icon="calendar" color="#9575CD" onPress={() => router.push("/elder/Appointments")} />
             <QuickAccessCard title="Prescriptions" icon="receipt" color="#4DB6AC" onPress={() => router.push("/elder/Prescriptions")} />
-            <QuickAccessCard title="Emergency Contacts" icon="alert-circle" color="#F06292" onPress={() => router.push("/elder/EmergencyContacts")} />
-            <QuickAccessCard title="AI Assistant" icon="robot" color="#FFD54F" onPress={() => router.push("/elder/SocialConnect")} />
+            <QuickAccessCard title="AI Assistant" icon="chatbubbles" color="#FFD54F" onPress={() => router.push("/elder/Chatbot")} />
+            <QuickAccessCard title="Social Connect" icon="people" color="#F06292" onPress={() => router.push("/elder/SocialConnect")} />
           </View>
         </View>
 

@@ -19,7 +19,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import CustomSnackbar from "../components/CustomSnackbar";
 import CustomCard from "../components/CustomCard";
 import BackButton from "../components/BackButton";
-import { appointmentAPI, socketService } from "../../services/api";
+import { appointmentAPI, authAPI, socketService } from "../../services/api";
 
 interface Appointment {
   id: number;
@@ -93,6 +93,28 @@ export default function Appointments() {
     fetchAppointments();
   };
 
+  const [elders, setElders] = useState<any[]>([]);
+  const [selectedElderId, setSelectedElderId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const profile = await authAPI.getProfile();
+        if (profile.elders && profile.elders.length > 0) {
+          const mappedElders = profile.elders.map((e: any) => ({
+            id: e.id,
+            name: e.name || e.full_name || "Unknown Patient"
+          }));
+          setElders(mappedElders);
+          setSelectedElderId(mappedElders[0].id);
+        }
+      } catch (e) {
+        console.error("Error loading profile for appointments:", e);
+      }
+    };
+    loadProfile();
+  }, []);
+
   const resetForm = () => {
     setTitle("");
     setDoctorName("");
@@ -125,17 +147,37 @@ export default function Appointments() {
     }
 
     try {
-      await appointmentAPI.add({
+      const response = await appointmentAPI.add({
         title,
         doctor_name: doctorName || undefined,
         location: location || undefined,
         appointment_date: appointmentDate.toISOString(),
         duration_minutes: parseInt(duration) || 30,
         notes: notes || undefined,
+        elder_id: selectedElderId || undefined,
       });
-      showSnackbar("Appointment added successfully");
+
+      // BUTTER UPDATE: Inject into local state instantly
+      const newApt: Appointment = {
+        id: response.appointment_id || Date.now(),
+        elder_id: selectedElderId || 0,
+        elder_name: elders.find(e => e.id === selectedElderId)?.name || "Patient",
+        title,
+        doctor_name: doctorName || undefined,
+        location: location || undefined,
+        appointment_date: appointmentDate.toISOString(),
+        duration_minutes: parseInt(duration) || 30,
+        status: 'scheduled',
+        notes: notes || undefined,
+      };
+
+      setAppointments(prev => [newApt, ...prev]);
+      
+      showSnackbar("✅ Appointment added successfully!");
       setModalVisible(false);
       resetForm();
+      
+      // Silent background refresh
       fetchAppointments();
     } catch (error: any) {
       Alert.alert("Error", error.message || "Failed to add appointment");

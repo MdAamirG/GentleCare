@@ -33,10 +33,20 @@ export default function CaretakerDashboard() {
 
   useEffect(() => {
     loadDashboard();
-    const refresh = () => loadDashboard();
+    const refresh = () => {
+      loadDashboard();
+    };
+
+    // Global events that should trigger a refresh
     socketService.on('medication_logged', refresh);
+    socketService.on('medication_added', refresh);
+    socketService.on('meal_consumed', refresh);
+    socketService.on('meal_added', refresh);
+    socketService.on('health_record_added', refresh);
     socketService.on('elder_linked', refresh);
     socketService.on('notification_created', refresh);
+    socketService.on('appointment_added', refresh);
+    socketService.on('appointment_updated', refresh);
     
     const handleEmergencyAlert = (data: any) => {
       Alert.alert(
@@ -44,14 +54,21 @@ export default function CaretakerDashboard() {
         `Critical event detected for ${data.elder_name}:\n${data.alert_type}`,
         [{ text: "Acknowledge", style: "destructive" }]
       );
+      loadDashboard();
     };
     socketService.on('emergency_alert', handleEmergencyAlert);
 
     return () => {
-      socketService.off('medication_logged', refresh);
-      socketService.off('elder_linked', refresh);
-      socketService.off('notification_created', refresh);
-      socketService.off('emergency_alert', handleEmergencyAlert);
+      socketService.off('medication_logged');
+      socketService.off('medication_added');
+      socketService.off('meal_consumed');
+      socketService.off('meal_added');
+      socketService.off('health_record_added');
+      socketService.off('elder_linked');
+      socketService.off('notification_created');
+      socketService.off('emergency_alert');
+      socketService.off('appointment_added');
+      socketService.off('appointment_updated');
     };
   }, [loadDashboard]);
 

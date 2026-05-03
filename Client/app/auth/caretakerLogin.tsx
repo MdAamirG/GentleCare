@@ -12,6 +12,7 @@ export default function CaretakerLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -21,11 +22,12 @@ export default function CaretakerLogin() {
 
     try {
       setLoading(true);
+      setError(null);
       const response = await authAPI.login(email, password);
       
       // Validate user type
       if (response.user.user_type !== 'caretaker') {
-        Alert.alert("Error", "This account is not a caretaker account. Please use the Elder login.");
+        setError("This account is not a caretaker account. Please use the Elder login.");
         await authAPI.logout();
         return;
       }
@@ -33,7 +35,7 @@ export default function CaretakerLogin() {
       // Navigate to caretaker dashboard
       router.replace("/caretaker/Dashboard");
     } catch (error: any) {
-      Alert.alert("Login Failed", error.message || "Invalid credentials");
+      setError(error.message || "Invalid credentials");
     } finally {
       setLoading(false);
     }
@@ -59,6 +61,11 @@ export default function CaretakerLogin() {
           </View>
 
           <View style={styles.form}>
+            {error && (
+              <View style={[styles.errorContainer, { backgroundColor: colors.error + '15' }]}>
+                <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+              </View>
+            )}
             <TextInput
               label="Email"
               mode="outlined"
@@ -184,5 +191,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     marginTop: 32,
+  },
+  errorContainer: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    width: '100%',
+  },
+  errorText: {
+    fontSize: 14,
+    fontFamily: "Poppins_500Medium",
+    textAlign: 'center',
   },
 });

@@ -44,6 +44,8 @@ export default function CaretakerMedications() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -67,17 +69,25 @@ export default function CaretakerMedications() {
     }
   }, []);
 
-  // Resolve the first linked elder's ID for adding medications
+  // Resolve linked elders for selection
   const [elderId, setElderId] = useState<number | null>(null);
+  const [elders, setElders] = useState<{ id: number; name: string }[]>([]);
+
   useEffect(() => {
     const loadProfile = async () => {
       try {
         const profile = await authAPI.getProfile();
         if (profile.elders && profile.elders.length > 0) {
-          setElderId(profile.elders[0].id);
+          const mapped = profile.elders.map((e: any) => ({
+            id: e.id,
+            name: e.name || e.full_name || 'Unknown Patient'
+          }));
+          setElders(mapped);
+          // Auto-select first elder as default
+          setElderId(mapped[0].id);
         }
       } catch (e) {
-        // Profile load failed
+        console.error('Error loading profile for medications:', e);
       }
     };
     loadProfile();
@@ -114,7 +124,8 @@ export default function CaretakerMedications() {
         Alert.alert('Error', 'No elder linked to your account. Please link an elder first.');
         return;
       }
-      await medicationAPI.add({
+      setSubmitting(true);
+      const response = await medicationAPI.add({
         elder_id: elderId,
         name: formData.name,
         dosage: formData.dosage,
@@ -123,11 +134,33 @@ export default function CaretakerMedications() {
         instructions: formData.instructions,
       });
 
-      showSnackbar('✅ Medication added successfully');
+      // 1. Close Modal IMMEDIATELY
       setAddModalVisible(false);
+
+      // 2. Optimistic Update: Inject medication into the list
+      const newMed: Medication = {
+        id: response.medication_id || Date.now(),
+        name: formData.name,
+        dosage: formData.dosage,
+        time: formData.time,
+        frequency: formData.frequency,
+        instructions: formData.instructions,
+        is_active: true,
+        status: 'pending'
+      };
+      
+      setMedications(prev => [newMed, ...prev]);
+
+      // 3. Reset form
       resetForm();
+      setSubmitting(false);
+      
+      // 4. Success popup
+      Alert.alert('Success', 'Medication added successfully!');
       loadMedications();
+      
     } catch (error: any) {
+      setSubmitting(false);
       Alert.alert('Error', error.message || 'Failed to add medication');
     }
   };
@@ -336,6 +369,28 @@ export default function CaretakerMedications() {
             <Text style={styles.modalTitle}>Add New Medication</Text>
 
             <ScrollView>
+              {/* Elder Selector — only shown if caretaker manages multiple elders */}
+              {elders.length > 1 && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#666', marginBottom: 8 }}>
+                    Assign to Patient *
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {elders.map(elder => (
+                      <Button
+                        key={elder.id}
+                        mode={elderId === elder.id ? 'contained' : 'outlined'}
+                        onPress={() => setElderId(elder.id)}
+                        compact
+                        style={{ marginBottom: 4 }}
+                      >
+                        {elder.name}
+                      </Button>
+                    ))}
+                  </View>
+                </View>
+              )}
+
               <TextInput
                 label="Medication Name *"
                 value={formData.name}
@@ -404,8 +459,10 @@ export default function CaretakerMedications() {
                   mode="contained"
                   onPress={handleAddMedication}
                   style={styles.modalButton}
+                  loading={submitting}
+                  disabled={submitting || isSuccess}
                 >
-                  Add Medication
+                  {submitting ? 'Adding...' : (isSuccess ? 'Added!' : 'Add Medication')}
                 </Button>
               </View>
             </ScrollView>

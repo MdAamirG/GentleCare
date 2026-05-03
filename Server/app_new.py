@@ -72,25 +72,28 @@ with app.app_context():
         db.create_all()
         logger.info('Database tables initialized')
 
-        # Only create test users in development mode
-        if not IS_PRODUCTION:
+        # Only seed test users in development mode (never in production)
+        if os.getenv('FLASK_ENV', 'development') == 'development':
             try:
-                if not User.query.filter_by(email='elder@test.com').first():
-                    elder = User(email='elder@test.com', password_hash=bcrypt.generate_password_hash('password').decode('utf-8'), full_name='John Elder', phone='+1234567890', user_type='elder')
-                    db.session.add(elder)
-                    db.session.flush()
-                    db.session.add(ElderProfile(user_id=elder.id, emergency_contact='+1234567890'))
-                    db.session.commit()
-                    logger.info('Created test elder: elder@test.com')
-                if not User.query.filter_by(email='caretaker@test.com').first():
+                ct = User.query.filter_by(email='caretaker@test.com').first()
+                if not ct:
                     ct = User(email='caretaker@test.com', password_hash=bcrypt.generate_password_hash('password').decode('utf-8'), full_name='Mary Caretaker', phone='+0987654321', user_type='caretaker')
                     db.session.add(ct)
                     db.session.flush()
                     db.session.add(CaretakerProfile(user_id=ct.id))
                     db.session.commit()
-                    logger.info('Created test caretaker: caretaker@test.com')
+                    logger.info('Ensured test caretaker exists: caretaker@test.com')
+                
+                elder = User.query.filter_by(email='elder@test.com').first()
+                if not elder:
+                    elder = User(email='elder@test.com', password_hash=bcrypt.generate_password_hash('password').decode('utf-8'), full_name='John Elder', phone='+1234567890', user_type='elder')
+                    db.session.add(elder)
+                    db.session.flush()
+                    db.session.add(ElderProfile(user_id=elder.id, emergency_contact='+1234567890', caretaker_id=ct.id))
+                    db.session.commit()
+                    logger.info('Ensured test elder exists: elder@test.com')
             except Exception as e:
-                logger.info(f'Test users: {e}')
+                logger.error(f'Error ensuring test users: {e}')
     except Exception as e:
         logger.error(f'Database init error: {e}')
 
@@ -251,6 +254,7 @@ def signup():
         full_name = (data.get('full_name') or '').strip()
         phone = (data.get('phone') or '').strip()
         user_type = data.get('user_type', '')
+        link_email = (data.get('link_email') or '').strip().lower()
 
         if not all([email, password, full_name, user_type]):
             return jsonify({"error": "Email, password, full name, and user type are required"}), 400
@@ -272,11 +276,47 @@ def signup():
         db.session.flush()
 
         if user_type == 'elder':
-            db.session.add(ElderProfile(user_id=user.id, emergency_contact=data.get('emergency_contact'), medical_conditions=data.get('medical_conditions')))
+            profile = ElderProfile(
+                user_id=user.id, 
+                emergency_contact=data.get('emergency_contact'), 
+                medical_conditions=data.get('medical_conditions')
+            )
+            
+            # Auto-link to caretaker if email provided
+            if link_email:
+                ct = User.query.filter_by(email=link_email, user_type='caretaker').first()
+                if ct:
+                    profile.caretaker_id = ct.id
+                    logger.info(f"Auto-linked elder {email} to caretaker {link_email}")
+            
+            db.session.add(profile)
         else:
-            db.session.add(CaretakerProfile(user_id=user.id, specialization=data.get('specialization'), experience_years=data.get('experience_years')))
+            # Safely handle experience_years as integer
+            exp_years = data.get('experience_years')
+            try:
+                exp_years = int(exp_years) if exp_years else 0
+            except (ValueError, TypeError):
+                exp_years = 0
+                
+            profile = CaretakerProfile(
+                user_id=user.id, 
+                specialization=data.get('specialization'), 
+                experience_years=exp_years
+            )
+            db.session.add(profile)
+            db.session.flush()
+
+            # Auto-link to elder if email provided
+            if link_email:
+                el_user = User.query.filter_by(email=link_email, user_type='elder').first()
+                if el_user:
+                    el_profile = ElderProfile.query.filter_by(user_id=el_user.id).first()
+                    if el_profile:
+                        el_profile.caretaker_id = user.id
+                        logger.info(f"Auto-linked caretaker {email} to elder {link_email}")
 
         db.session.commit()
+        logger.info(f"New user signed up: {email} ({user_type})")
 
         access_token = create_access_token(identity=str(user.id))
         return jsonify({
@@ -293,13 +333,25 @@ def signup():
 def login():
     """User login"""
     try:
-        data = request.json
-        email = data.get('email')
-        password = data.get('password')
+        data = request.json or {}
+        email = (data.get('email') or '').strip().lower()
+        password = data.get('password', '')
         
+        logger.info(f"Login attempt for email: {email}")
+
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
+
         user = User.query.filter_by(email=email).first()
-        if not user or not bcrypt.check_password_hash(user.password_hash, password):
+        if not user:
+            logger.warning(f"Login failed: User {email} not found")
             return jsonify({"error": "Invalid credentials"}), 401
+            
+        if not bcrypt.check_password_hash(user.password_hash, password):
+            logger.warning(f"Login failed: Incorrect password for {email}")
+            return jsonify({"error": "Invalid credentials"}), 401
+        
+        logger.info(f"Login successful for {email} (ID: {user.id})")
         
         access_token = create_access_token(identity=str(user.id))
         
@@ -372,9 +424,16 @@ def link_caretaker():
             }
         }), 200
         
+@app.route('/auth/refresh', methods=['POST'])
+@jwt_required()
+def refresh_token():
+    """Renew the access token"""
+    try:
+        user_id = get_jwt_identity()
+        new_token = create_access_token(identity=str(user_id))
+        return jsonify({"access_token": new_token}), 200
     except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": _safe_error(e, 'Failed to link caretaker')}), 500
+        return jsonify({"error": _safe_error(e, 'Failed to refresh token')}), 500
 
 # ===========================
 # USER PROFILE & DASHBOARD
@@ -750,39 +809,47 @@ def add_health_record():
         db.session.commit()
         
         elder_profile = ElderProfile.query.get(elder_id)
-        
+
+        # Emit real-time events
+        emit_to_care_team(elder_id, 'health_record_added', {
+            'record_id': record.id,
+            'elder_id': elder_id,
+            'type': record.record_type,
+            'value': record.value,
+            'recorded_at': record.recorded_at.isoformat()
+        })
+
         # Check alerting pipeline for health records
-        # Trigger: heart rate >100 or fall_detected
         is_alert = False
         alert_reasons = []
-        if record.record_type.lower() == 'heart rate' and float(record.value) > 100:
-            is_alert = True
-            alert_reasons.append(f"High Heart Rate ({record.value})")
-        # Add future checks for Fall Detection here
+        rec_type = (record.record_type or "").lower()
+        if 'heart' in rec_type and 'rate' in rec_type:
+            try:
+                if float(record.value) > 100:
+                    is_alert = True
+                    alert_reasons.append(f"High Heart Rate ({record.value})")
+            except: pass
         
         if is_alert:
             alert_type = " | ".join(alert_reasons)
-            # Log to DB
-            from datetime import datetime
-            from models import Notification
-            # Note: A separate Alerts table is ideal, but using Notification as proxy for prototype
-            if elder_profile.caretaker_id:
+            if elder_profile and elder_profile.caretaker_id:
+                # Notification is already imported at the top of the file
                 notif = Notification(
                     recipient_user_id=elder_profile.caretaker_id,
                     title="EMERGENCY ALERT",
                     message=f"Alert for {elder_profile.user.full_name}: {alert_type}",
-                    action_url=f"/caretaker/HealthRecords",
+                    action_url="/caretaker/HealthRecords",
                     created_at=datetime.utcnow()
                 )
                 db.session.add(notif)
                 db.session.commit()
-                # Mock FCM Push via Socket
+                
                 socketio.emit('emergency_alert', {
-                    'elder_id': elder_id,
-                    'elder_name': elder_profile.user.full_name,
-                    'alert_type': alert_type
+                    'title': "EMERGENCY",
+                    'message': f"{elder_profile.user.full_name} has a high heart rate!",
+                    'elder_id': elder_id
                 }, room=f'user_{elder_profile.caretaker_id}')
-                print(f"[FCM PUSH MOCK] Alert triggered for Elder {elder_id}: {alert_type}")
+                logger.warning(f"[ALERT] High heart rate for Elder {elder_id}: {alert_type}")
 
         # Regular notification for non-emergency records
         if not is_alert and elder_profile.caretaker_id:
